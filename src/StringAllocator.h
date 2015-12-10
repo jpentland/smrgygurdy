@@ -1,19 +1,19 @@
-#include "artifastring/violin_instrument.h"
 #ifndef STRING_ALLOCATOR_H
 #define STRING_ALLOCATOR_H
+#include "artifastring/artifastring_instrument.h"
+#include "ViolinFingering.h"
 
 /**
  * Will create violin strings and decide which string should be used for playing the various notes
  */
 class StringAllocator {
 
+	ViolinFingering fingering;
 	const double bowRatioFromBridge, bowForce;
-	const int vGString;
 	double bowSpeed;
 	int stringSpace;
-	ViolinInstrument violin;
+	ArtifastringInstrument vc;
 	int stringNo;
-	
 
 	public:
 		/**
@@ -29,13 +29,14 @@ class StringAllocator {
 		void getSamples(short buffer[], int bufferSize);
 
 		/**
-		 * Select a given semitone on the violin and begin playing
+		 * Select a fingering position corresponding to the given MIDI note number on the
+		 * violin and begin playing
 		 *
 		 * If the violin has been silenced, this will cause it to begin playing again.
 		 *
-		 * @param semitone Semitone value to be played (0-127)
+		 * @param midinote Semitone value to be played (0-127)
 		 */
-		void setSemitone(int semitone);
+		void setSemitone(int midinote);
 
 		/**
 		 * Set speed at which the string is being bowed.

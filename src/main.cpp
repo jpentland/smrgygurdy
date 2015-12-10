@@ -18,6 +18,7 @@
 #ifdef SUPPORT_COMEDI
 #include "Comedi.h"
 #endif
+#include "ModulationPedal.h"
 #include "DummyPedal.h"
 #include "Controller.h"
 #include "Keyboard.h"
@@ -61,6 +62,7 @@ int main(int argc, char ** argv) {
 	int noThreads;      cfg.lookupValue("threads", noThreads);
 	int keyboard_id;    cfg.lookupValue("midi.controller_id", keyboard_id);
 	int keyboard_port;  cfg.lookupValue("midi.controller_port", keyboard_port);
+	int temperament;    cfg.lookupValue("midi.temperament", temperament);
 	double output_gain; cfg.lookupValue("model.output_gain", output_gain);
 	double autofade;    cfg.lookupValue("model.autofade_point", autofade);
 	double v_bow_max;   cfg.lookupValue("model.bow_speed_max", v_bow_max);
@@ -78,9 +80,10 @@ int main(int argc, char ** argv) {
 	  {"threads",      required_argument, 0, 't'},
 	  {"midi-id",      required_argument, 0, 'M'},
 	  {"midi-port",    required_argument, 0, 'm'},
+	  {"temperament",  required_argument, 0, 'T'},
 	  {"output-gain",  required_argument, 0, 'g'},
 	  {"bow-speed-max",required_argument, 0, 'S'},
-	  {"bow-speed-min",required_argument, 0, 'S'},
+	  {"bow-speed-min",required_argument, 0, 's'},
 	  {"list-midi",    no_argument,       0, 'l'},
 	  {"verbose",      optional_argument, 0, 'v'},
 	  {"help",         no_argument,       0, 'h'},
@@ -89,7 +92,7 @@ int main(int argc, char ** argv) {
 	int c, option_index;
 	do {
 		c = getopt_long (argc, argv,
-				 "d:a:P:b:r:p:t:M:m:g:S:s:lv::h",
+				 "d:a:P:b:r:p:t:M:m:T:g:S:s:lv::h",
 		                 long_options, &option_index);
 		switch (c) {
 		    case 'd':
@@ -100,8 +103,7 @@ int main(int argc, char ** argv) {
 		    case 'a':
 			autofade = atof(optarg);
 			cfg.lookup("model.autofade") = autofade;
-			cout << "Fade out below pedal = " << autofade
-			     << "\"" << endl;
+			cout << "Fade out below pedal = " << autofade << endl;
 			break;
 		    case 'P':
 			pedal_dev = optarg;
@@ -138,6 +140,12 @@ int main(int argc, char ** argv) {
 			cfg.lookup("midi.controller_port") = keyboard_port;
 			cout << "Midi controller uses port " << keyboard_port << endl;
 			break;
+		    case 'T':
+			temperament = 
+			  ViolinFingering::setTemperament(ViolinFingering::Temperament(atoi(optarg)));
+			cfg.lookup("temperament") = temperament;
+			cout << "Temperament is " << ViolinFingering::tuningSets[temperament].longdesc;
+			break;
 		    case 'g':
 			output_gain = atof(optarg);
 			cfg.lookup("model.output_gain") = output_gain;
@@ -154,7 +162,7 @@ int main(int argc, char ** argv) {
 			cout << "Bow speed (no pedal) set to " << v_bow_min << endl;
 			break;
 		    case 'l':
-			exit (system("aconnect -lo"));
+			exit (system("aconnect -li"));
 		    case 'h':
 			exit (usage());
 		    case 'v':
@@ -167,6 +175,9 @@ int main(int argc, char ** argv) {
 		}
 
 	} while (c != -1);
+	
+	// Assign Temperament
+	ViolinFingering::setTemperament(ViolinFingering::Temperament(temperament));
 
 	// Create Models
 	SoundModelPoly *mainModel;		/* SoundModel to be passed to controller */
@@ -176,20 +187,19 @@ int main(int argc, char ** argv) {
 
 	sink = new OutputMixer(noThreads, pcm, bsize, rate);
 
-	/* This will assign SoundModelMono instances as equally as possible to SoundModelPoly's
-	   which will then be used by threads */
+	/* This will assign SoundModelMono instances as equally as possible to each SoundModelPoly,
+	   one of which will be given to each thread */
 	int perThread = poly/noThreads;
 	int extra = poly % noThreads;
-	cout << "extra = " << extra << endl;
 
 	for(int i = 0; i < noThreads; i++) {
 		int models = perThread;
 		if(i < extra) models++;
-		cout << "Assigning " << models << " models to a thread" << endl;
-		subModels.push_back(new SoundModelPoly(models));
+		//cout << "Assigning " << models << " models to a thread" << endl;
+		subModels.push_back(new SoundModelPoly(models, output_gain));
 	}
 
-	mainModel = new SoundModelPoly(subModels);
+	mainModel = new SoundModelPoly(subModels, output_gain);
 
 	// Create Playout Threads
 	for(int i = 0; i < noThreads; i++) {
@@ -215,6 +225,9 @@ int main(int argc, char ** argv) {
 	if (!pedal_dev.compare("comedi"))
 		pedal = new Comedi(&controller, 0.01, verbosity);
 #endif
+	if (!pedal_dev.compare("modwheel"))
+		pedal = new ModulationPedal(&controller, 0.01, verbosity);
+
 	if (!pedal_dev.compare("dummy"))
 		pedal = new DummyPedal(&controller);
 
@@ -233,8 +246,13 @@ int main(int argc, char ** argv) {
 	cout << "      C to report stats" << endl;
 	cout << "      G to set output gain" << endl;
 	cout << "      S/Shift-S to set bow speed (no/full pedal)" << endl;
+	cout << "      T to change temperament" << endl;
 
-	while( (c = getchar()) != 'q') {
+	// Work with the current tuning set
+	const ViolinFingering::TuningSet &t =
+	  ViolinFingering::tuningSets[ViolinFingering::getTemperament()];
+
+	  while( (c = getchar()) != 'q') {
 	    switch (c) {
 	      case 'c':
 	        cout << "Bowing at " << controller.get_bow_speed()
@@ -243,6 +261,9 @@ int main(int argc, char ** argv) {
 		cout << "Bow speed limits: " << controller.min_speed
 		     << "..." << controller.max_speed << endl;
 		cout << "Output gain: " << output_gain << endl;
+		cout << "Temperament: "
+		     << ViolinFingering::tuningSets[ViolinFingering::getTemperament()].longdesc
+		     << endl;
 	        break;
 
 	      case 'g':
@@ -270,6 +291,23 @@ int main(int argc, char ** argv) {
 		controller.speedChange(pedal->get_value());
 		cfg.lookup("model.bow_speed_min") = v_bow_min;
 		break;
+		
+	      case 't':
+		cout << "Current temperament = " << t.longdesc << endl
+		     << "Select from the following:" << endl;
+		for (ViolinFingering::Temperament i = ViolinFingering::Temperament(0);
+		     i < ViolinFingering::END;
+		     i = ViolinFingering::Temperament(i+1) ) {
+			cout << '\t' << i << ": "
+			     << ViolinFingering::tuningSets[i].longdesc
+			     << endl;
+		}
+		cin >> temperament;
+		temperament = 
+		  ViolinFingering::setTemperament(ViolinFingering::Temperament(temperament));
+		cfg.lookup("midi.temperament") = temperament;
+		break;
+		     
 
 	      case EOF:      break;
 	      case '\n':     break;
@@ -289,7 +327,8 @@ int usage(void)
         cout << "\t--alsa-device=dev | -ddev:      Set audio output stream" << endl;
         cout << "\t--pedal-device=class | -Pclass: Set pedal device class" << endl;
         cout << "\t        Supported classes: comedi; minilab1080" << endl;
-	cout << "\t                           dummy (fixed value 0.75)" << endl;
+        cout << "\t                           modwheel (wheel on MIDI controller)" << endl;
+        cout << "\t                           dummy (fixed value 0.75)" << endl;
         cout << "\t--buffer-size=size | -bsize:    Set audio buffer length to size" << endl;
         cout << "\t--sample-rate=rate | -rrate:    Set audio sample rate in Hz" << endl;
         cout << "\t--polyphony=voices | -pvoices:  Set max number of sounding voices" << endl;

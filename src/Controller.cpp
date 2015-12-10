@@ -12,8 +12,9 @@ Controller::Controller(SoundModel *playout,
                        double autofade_point) :
 	isPlaying(true), pedalTriggered(false),
 	noteQueue(),
-	speed(speed_max), autofade(autofade_point),
-	max_speed(speed_max), min_speed(speed_min)
+	speed(speed_max), modulation(0), autofade(autofade_point),
+	max_speed(speed_max), min_speed(speed_min),
+	modulationEventListener(NULL)
 {
 	playout->setPedalSpeed(speed);
 	this->playout = playout;
@@ -48,6 +49,7 @@ void Controller::run(){
 		}
 		queueLock.release();
 
+
 		//If pedal speed has changed pass new value to playout.
 		pedalLock.acquire();
 		if(pedalTriggered){
@@ -72,6 +74,23 @@ void Controller::keyEvent(bool type, int note){
 	outputLock.broadcast();
 	outputLock.release();
 }
+
+void Controller::modulationEvent(int parameter) {
+	// Store new modulation value
+	modulation = (double)parameter / 127.0;
+	if (modulationEventListener)
+		modulationEventListener->modulationEventCallback(parameter);
+}
+
+ModulationEventListener *
+  Controller::registerEventListener(ModulationEventListener *listener) {
+  
+  ModulationEventListener *oldListener = modulationEventListener;
+  modulationEventListener = listener;
+
+  return oldListener;
+}
+  
 
 void Controller::speedChange(double spd){
 	pedalLock.acquire();
